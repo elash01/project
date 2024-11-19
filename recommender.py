@@ -1,45 +1,32 @@
-# recommender.py
-
 import pandas as pd
 import numpy as np
 from sklearn.decomposition import TruncatedSVD
-from spotipy import Spotify
-from spotipy.oauth2 import SpotifyClientCredentials
-from dotenv import load_dotenv
-import os
 
-# Load data and environment variables
+# Load data
 spotify_data = pd.read_csv(
     "spotify_dataset.csv"
-)  # Ensure this file is present in your directory
-
-# Load Spotify API credentials from .env file
-load_dotenv()
-client_id = os.getenv("a30eb90686c74f0a9e7268bc42c9eb61")
-client_secret = os.getenv("9eb5cf8151634a79a1278380bfa4689d")
-
-# Initialize Spotipy with client credentials
-sp = Spotify(
-    auth_manager=SpotifyClientCredentials(
-        client_id=client_id, client_secret=client_secret
-    )
-)
+)  # Ensure this file is in your directory
 
 # Prepare features for matrix factorization
-X = spotify_data[
-    [
-        "acousticness",
-        "danceability",
-        "energy",
-        "instrumentalness",
-        "liveness",
-        "valence",
-    ]
+numeric_features = [
+    "acousticness",
+    "danceability",
+    "energy",
+    "instrumentalness",
+    "liveness",
+    "valence",
 ]
-# TruncatedSVD with reduced components based on feature count to avoid ValueError
-n_components = min(5, X.shape[1])
+spotify_data[numeric_features] = spotify_data[numeric_features].apply(
+    pd.to_numeric, errors="coerce"
+)
+spotify_data = spotify_data.dropna(
+    subset=numeric_features
+)  # Remove rows with missing values
+
+# Perform dimensionality reduction for recommendation
+n_components = min(5, len(numeric_features))  # Use fewer components for simplicity
 svd = TruncatedSVD(n_components=n_components)
-X_reduced = svd.fit_transform(X)
+X_reduced = svd.fit_transform(spotify_data[numeric_features])
 
 
 # Recommendation function
@@ -52,7 +39,7 @@ def recommend_songs(song_id, top_n=10):
         top_n (int): Number of similar songs to recommend.
 
     Returns:
-        list: List of recommended song names.
+        list: List of dictionaries with recommended song details.
     """
     try:
         # Find the index of the given song ID
@@ -63,40 +50,31 @@ def recommend_songs(song_id, top_n=10):
         similarity = np.dot(X_reduced, song_vector)
 
         # Get indices of top N similar songs (excluding the song itself)
-        similar_songs = np.argsort(similarity)[::-1][1 : top_n + 1]
+        similar_songs_idx = np.argsort(similarity)[::-1][1 : top_n + 1]
 
-        # Return the names of the recommended songs
-        return spotify_data.iloc[similar_songs]["name"].tolist()
+        # Retrieve the recommended songs' details
+        recommendations = spotify_data.iloc[similar_songs_idx][
+            ["name", "artists", "popularity", "id"]
+        ]
+        return recommendations.to_dict("records")
 
     except IndexError:
         print(f"Song ID {song_id} not found in dataset.")
         return []
 
 
-# Example function to search for song details with Spotipy
+# Example function to search for songs in the dataset
 def search_song_details(song_name):
     """
-    Search for song details by name using Spotipy.
+    Search for song details by name in the local dataset.
 
     Parameters:
         song_name (str): Name of the song to search for.
 
     Returns:
-        list: List of dictionaries with song details, including name, ID, and album cover.
+        list: List of dictionaries with song details.
     """
-    results = sp.search(q=song_name, type="track", limit=5)
-    song_details = []
-
-    for track in results["tracks"]["items"]:
-        song_details.append(
-            {
-                "name": track["name"],
-                "id": track["id"],
-                "album_cover": track["album"]["images"][0]["url"]
-                if track["album"]["images"]
-                else None,
-                "preview_url": track["preview_url"],  # Audio preview link if available
-            }
-        )
-
-    return song_details
+    search_results = spotify_data[
+        spotify_data["name"].str.contains(song_name, case=False, na=False)
+    ]
+    return search_results[["name", "artists", "id", "popularity"]].to_dict("records")
