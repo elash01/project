@@ -1,0 +1,8 @@
+streamlit
+spotipy
+pandas
+numpy
+matplotlib
+wordcloud
+scikit-learn
+python-dotenv
